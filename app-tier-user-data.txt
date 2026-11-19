@@ -1,36 +1,42 @@
-#!/bin/bash 
-# Update package list and install required packages 
-sudo yum update -y
+#!/bin/bash
+# Debug sathi: sagla output ya file madhe jato
+exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+set -x
 
-# Install Node.js
-curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - 
-sudo yum install -y nodejs 
+# 1. Install CodeDeploy agent FIRST (ap-south-1 region)
+yum install -y ruby wget
+cd /home/ec2-user
+wget https://aws-codedeploy-ap-south-1.s3.ap-south-1.amazonaws.com/latest/install
+chmod +x ./install
+./install auto
+systemctl enable --now codedeploy-agent
 
-# Install PM2 globally 
-sudo npm install -g pm2 
+# 2. Update packages
+yum update -y
 
-# Define the log directory and ensure it exists 
-LOG_DIR="/var/log/react-node-mysql-app/backend" 
-mkdir -p $LOG_DIR 
-sudo chown -R root:root $LOG_DIR
+# 3. Install Node.js
+curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+yum install -y nodejs
 
-# Create the combined.log file
-sudo touch $LOG_DIR/combined.log
-sudo chown root:root $LOG_DIR/combined.log  # Set ownership to root
+# 4. Install PM2 globally
+npm install -g pm2
 
-# Create the error.log file
-sudo touch $LOG_DIR/error.log
-sudo chown root:root $LOG_DIR/error.log  # Set ownership to root
+# 5. Log directory and files
+LOG_DIR="/var/log/react-node-mysql-app/backend"
+mkdir -p $LOG_DIR
+touch $LOG_DIR/combined.log
+touch $LOG_DIR/error.log
+chown -R root:root $LOG_DIR
 
-# Ensure PM2 restarts on reboot as root
-sudo -u root pm2 startup systemd 
-sudo -u root pm2 save 
+# 6. PM2 startup on reboot
+env PATH=$PATH:/usr/bin pm2 startup systemd -u root --hp /root
+pm2 save
 
-# Install CloudWatch agent
-sudo yum install -y amazon-cloudwatch-agent
+# 7. Install CloudWatch agent
+yum install -y amazon-cloudwatch-agent
 
-# Create CloudWatch agent configuration
-sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null <<EOL
+# 8. CloudWatch agent configuration
+tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null <<'EOL'
 {
   "logs": {
     "logs_collected": {
@@ -70,14 +76,5 @@ sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /de
 }
 EOL
 
-# Start CloudWatch agent
-sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
-
-# Install code deploy agent
-sudo yum install ruby -y
-sudo yum install wget -y
-cd /home/ec2-user
-wget https://aws-codedeploy-us-east-1.s3.us-east-1.amazonaws.com/latest/install
-chmod +x ./install
-sudo ./install auto
-sudo systemctl start codedeploy-agent
+# 9. Start CloudWatch agent
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
